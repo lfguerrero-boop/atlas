@@ -130,7 +130,7 @@ export async function GET(
     }),
   );
 
-  return new NextResponse(buffer, {
+  return new NextResponse(new Uint8Array(buffer), {
     headers: {
       "Content-Type": "application/pdf",
       "Content-Disposition": `inline; filename="reporte-${paciente.nombre_completo.replace(/\s+/g, "-")}.pdf"`,
