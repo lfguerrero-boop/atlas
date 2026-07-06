@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { EvolucionChart } from "@/components/resultados/EvolucionChart";
+import { EnviarReporteButton } from "@/components/resultados/EnviarReporteButton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,11 +20,13 @@ export default async function ResultadosPage({
   const supabase = await createClient();
 
   const [
+    { data: paciente },
     { data: anamnesis },
     { data: valoracionFisica },
     { data: antropometricas },
     { data: fotos },
   ] = await Promise.all([
+    supabase.from("pacientes").select("email").eq("id", pacienteId).single(),
     supabase
       .from("anamnesis")
       .select("*")
@@ -174,11 +177,17 @@ export default async function ResultadosPage({
         </CardContent>
       </Card>
 
-      <Button asChild className="w-fit">
-        <Link href={`/api/reportes/${pacienteId}`} target="_blank">
-          Exportar reporte PDF
-        </Link>
-      </Button>
+      <div className="flex flex-wrap gap-3">
+        <Button asChild className="w-fit">
+          <Link href={`/api/reportes/${pacienteId}`} target="_blank">
+            Exportar reporte PDF
+          </Link>
+        </Button>
+        <EnviarReporteButton
+          pacienteId={pacienteId}
+          pacienteTieneEmail={!!paciente?.email}
+        />
+      </div>
     </div>
   );
 }
