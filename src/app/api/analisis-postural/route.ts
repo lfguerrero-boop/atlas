@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import {
-  calcularAlineacionRodillas,
+  calcularAlineacionRodillasParaVista,
   calcularAnguloCadera,
   calcularAnguloHombros,
   detectarAsimetrias,
-  landmarksCriticosVisibles,
+  landmarksVisiblesParaVista,
   type Landmark,
+  type Vista,
 } from "@/lib/postural/angulos";
 
 export async function POST(request: NextRequest) {
@@ -30,21 +31,11 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (!landmarksCriticosVisibles(landmarks)) {
-    return NextResponse.json(
-      {
-        error:
-          "Landmarks críticos con baja visibilidad (visibility < 0.5). Repetí la foto con mejor encuadre/iluminación.",
-      },
-      { status: 400 },
-    );
-  }
-
   // Verificar que la foto pertenece a un paciente del profesional autenticado (RLS ya lo filtra,
   // pero validamos explícitamente para devolver un 403 claro en vez de un 404 ambiguo).
   const { data: foto, error: fotoError } = await supabase
     .from("fotos_posturales")
-    .select("id, paciente_id")
+    .select("id, paciente_id, vista")
     .eq("id", fotoPosturalId)
     .single();
 
@@ -55,9 +46,28 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const anguloInclinacionHombros = calcularAnguloHombros(landmarks);
-  const anguloInclinacionCadera = calcularAnguloCadera(landmarks);
-  const alineacionRodillas = calcularAlineacionRodillas(landmarks);
+  const vista = foto.vista as Vista;
+
+  if (!landmarksVisiblesParaVista(landmarks, vista)) {
+    return NextResponse.json(
+      {
+        error:
+          "Landmarks críticos con baja visibilidad (visibility < 0.5). Repetí la foto con mejor encuadre/iluminación.",
+      },
+      { status: 400 },
+    );
+  }
+
+  // La comparación bilateral de hombros/cadera solo es válida de frente o de espaldas:
+  // en una foto lateral, medio cuerpo está ocluido y ese cálculo no tendría sentido.
+  const esVistaFrontal = vista === "anterior" || vista === "posterior";
+  const anguloInclinacionHombros = esVistaFrontal
+    ? calcularAnguloHombros(landmarks)
+    : null;
+  const anguloInclinacionCadera = esVistaFrontal
+    ? calcularAnguloCadera(landmarks)
+    : null;
+  const alineacionRodillas = calcularAlineacionRodillasParaVista(landmarks, vista);
   const asimetrias = detectarAsimetrias({
     anguloHombros: anguloInclinacionHombros,
     anguloCadera: anguloInclinacionCadera,

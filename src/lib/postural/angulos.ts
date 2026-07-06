@@ -1,5 +1,11 @@
 export type Landmark = { x: number; y: number; z: number; visibility: number };
 
+export type Vista =
+  | "anterior"
+  | "posterior"
+  | "lateral_derecha"
+  | "lateral_izquierda";
+
 /** Índices de los landmarks relevantes del modelo MediaPipe Pose (33 puntos). */
 export const LANDMARK = {
   HOMBRO_IZQ: 11,
@@ -36,10 +42,25 @@ function anguloEntreTresPuntos(a: Landmark, vertice: Landmark, c: Landmark): num
   return (Math.acos(Math.min(1, Math.max(-1, cos))) * 180) / Math.PI;
 }
 
-/** Verifica que los landmarks críticos para el análisis postural tengan suficiente visibilidad. */
-export function landmarksCriticosVisibles(landmarks: Landmark[]): boolean {
-  const indicesCriticos = Object.values(LANDMARK);
-  return indicesCriticos.every(
+/**
+ * En una foto lateral, medio cuerpo queda ocluido por el torso — eso es
+ * físicamente inevitable, no un problema de encuadre. Por eso la validación
+ * de visibilidad depende de la vista: en anterior/posterior se exigen ambos
+ * lados (se comparan hombro/cadera izq vs der); en lateral solo se exige el
+ * lado que la cámara efectivamente ve.
+ */
+export function landmarksVisiblesParaVista(
+  landmarks: Landmark[],
+  vista: Vista,
+): boolean {
+  const indices =
+    vista === "lateral_derecha"
+      ? [LANDMARK.HOMBRO_DER, LANDMARK.CADERA_DER, LANDMARK.RODILLA_DER, LANDMARK.TOBILLO_DER]
+      : vista === "lateral_izquierda"
+        ? [LANDMARK.HOMBRO_IZQ, LANDMARK.CADERA_IZQ, LANDMARK.RODILLA_IZQ, LANDMARK.TOBILLO_IZQ]
+        : Object.values(LANDMARK);
+
+  return indices.every(
     (i) => landmarks[i] && landmarks[i].visibility >= VISIBILIDAD_MINIMA,
   );
 }
@@ -67,22 +88,60 @@ export function calcularAnguloCadera(landmarks: Landmark[]): number {
 /**
  * Alineación de rodillas: desviación respecto a los 180° de una pierna recta
  * (cadera-rodilla-tobillo). Positivo indica valgo, negativo indica varo.
+ * En vistas laterales solo se calcula el lado visible; el otro queda null
+ * porque no hay dato confiable para compararlo.
  */
-export function calcularAlineacionRodillas(landmarks: Landmark[]) {
-  const anguloIzq = anguloEntreTresPuntos(
-    landmarks[LANDMARK.CADERA_IZQ],
-    landmarks[LANDMARK.RODILLA_IZQ],
-    landmarks[LANDMARK.TOBILLO_IZQ],
-  );
-  const anguloDer = anguloEntreTresPuntos(
-    landmarks[LANDMARK.CADERA_DER],
-    landmarks[LANDMARK.RODILLA_DER],
-    landmarks[LANDMARK.TOBILLO_DER],
-  );
+export function calcularAlineacionRodillasParaVista(
+  landmarks: Landmark[],
+  vista: Vista,
+): { valgoIzqGrados: number | null; valgoDerGrados: number | null } {
+  const calcularLado = (
+    cadera: number,
+    rodilla: number,
+    tobillo: number,
+  ): number =>
+    redondear(
+      180 -
+        anguloEntreTresPuntos(
+          landmarks[cadera],
+          landmarks[rodilla],
+          landmarks[tobillo],
+        ),
+    );
+
+  if (vista === "lateral_derecha") {
+    return {
+      valgoIzqGrados: null,
+      valgoDerGrados: calcularLado(
+        LANDMARK.CADERA_DER,
+        LANDMARK.RODILLA_DER,
+        LANDMARK.TOBILLO_DER,
+      ),
+    };
+  }
+
+  if (vista === "lateral_izquierda") {
+    return {
+      valgoIzqGrados: calcularLado(
+        LANDMARK.CADERA_IZQ,
+        LANDMARK.RODILLA_IZQ,
+        LANDMARK.TOBILLO_IZQ,
+      ),
+      valgoDerGrados: null,
+    };
+  }
 
   return {
-    valgoIzqGrados: redondear(180 - anguloIzq),
-    valgoDerGrados: redondear(180 - anguloDer),
+    valgoIzqGrados: calcularLado(
+      LANDMARK.CADERA_IZQ,
+      LANDMARK.RODILLA_IZQ,
+      LANDMARK.TOBILLO_IZQ,
+    ),
+    valgoDerGrados: calcularLado(
+      LANDMARK.CADERA_DER,
+      LANDMARK.RODILLA_DER,
+      LANDMARK.TOBILLO_DER,
+    ),
   };
 }
 
@@ -98,42 +157,55 @@ function severidadPorMagnitud(magnitud: number): Asimetria["severidad"] | null {
   return null;
 }
 
-/** Detecta asimetrías relevantes a partir de los ángulos ya calculados. */
+/**
+ * Detecta asimetrías relevantes a partir de los ángulos ya calculados.
+ * El ángulo de hombros/cadera (comparación bilateral) solo tiene sentido en
+ * vistas anterior/posterior; en laterales se pasa null y se omite ese chequeo.
+ */
 export function detectarAsimetrias(params: {
-  anguloHombros: number;
-  anguloCadera: number;
-  alineacionRodillas: { valgoIzqGrados: number; valgoDerGrados: number };
+  anguloHombros: number | null;
+  anguloCadera: number | null;
+  alineacionRodillas: { valgoIzqGrados: number | null; valgoDerGrados: number | null };
 }): Asimetria[] {
   const { anguloHombros, anguloCadera, alineacionRodillas } = params;
   const asimetrias: Asimetria[] = [];
 
-  const severidadHombros = severidadPorMagnitud(Math.abs(anguloHombros));
-  if (severidadHombros) {
-    const lado = anguloHombros > 0 ? "derecho" : "izquierdo";
-    asimetrias.push({
-      hallazgo: `Hombro ${lado} más bajo (${Math.abs(anguloHombros)}°)`,
-      severidad: severidadHombros,
-    });
+  if (anguloHombros !== null) {
+    const severidadHombros = severidadPorMagnitud(Math.abs(anguloHombros));
+    if (severidadHombros) {
+      const lado = anguloHombros > 0 ? "derecho" : "izquierdo";
+      asimetrias.push({
+        hallazgo: `Hombro ${lado} más bajo (${Math.abs(anguloHombros)}°)`,
+        severidad: severidadHombros,
+      });
+    }
   }
 
-  const severidadCadera = severidadPorMagnitud(Math.abs(anguloCadera));
-  if (severidadCadera) {
-    const lado = anguloCadera > 0 ? "derecha" : "izquierda";
-    asimetrias.push({
-      hallazgo: `Cadera ${lado} más baja (${Math.abs(anguloCadera)}°)`,
-      severidad: severidadCadera,
-    });
+  if (anguloCadera !== null) {
+    const severidadCadera = severidadPorMagnitud(Math.abs(anguloCadera));
+    if (severidadCadera) {
+      const lado = anguloCadera > 0 ? "derecha" : "izquierda";
+      asimetrias.push({
+        hallazgo: `Cadera ${lado} más baja (${Math.abs(anguloCadera)}°)`,
+        severidad: severidadCadera,
+      });
+    }
   }
 
-  const diferenciaRodillas = Math.abs(
-    alineacionRodillas.valgoIzqGrados - alineacionRodillas.valgoDerGrados,
-  );
-  const severidadRodillas = severidadPorMagnitud(diferenciaRodillas);
-  if (severidadRodillas) {
-    asimetrias.push({
-      hallazgo: `Asimetría entre rodillas (diferencia de ${redondear(diferenciaRodillas)}°)`,
-      severidad: severidadRodillas,
-    });
+  if (
+    alineacionRodillas.valgoIzqGrados !== null &&
+    alineacionRodillas.valgoDerGrados !== null
+  ) {
+    const diferenciaRodillas = Math.abs(
+      alineacionRodillas.valgoIzqGrados - alineacionRodillas.valgoDerGrados,
+    );
+    const severidadRodillas = severidadPorMagnitud(diferenciaRodillas);
+    if (severidadRodillas) {
+      asimetrias.push({
+        hallazgo: `Asimetría entre rodillas (diferencia de ${redondear(diferenciaRodillas)}°)`,
+        severidad: severidadRodillas,
+      });
+    }
   }
 
   return asimetrias;

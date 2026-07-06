@@ -5,17 +5,16 @@ import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { PoseCanvas } from "@/components/postural/PoseCanvas";
 import { usePoseLandmarker } from "@/components/postural/usePoseLandmarker";
 import {
-  calcularAlineacionRodillas,
+  calcularAlineacionRodillasParaVista,
   calcularAnguloCadera,
   calcularAnguloHombros,
   detectarAsimetrias,
   type Landmark,
+  type Vista,
 } from "@/lib/postural/angulos";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-
-type Vista = "anterior" | "posterior" | "lateral_derecha" | "lateral_izquierda";
 
 const ETIQUETAS: Record<Vista, string> = {
   anterior: "Vista anterior",
@@ -42,16 +41,18 @@ export function PosturalSlot({
     { hallazgo: string; severidad: string }[] | null
   >(null);
   const [angulos, setAngulos] = useState<{
-    hombros: number;
-    cadera: number;
-    valgoIzq: number;
-    valgoDer: number;
+    hombros: number | null;
+    cadera: number | null;
+    valgoIzq: number | null;
+    valgoDer: number | null;
   } | null>(null);
 
+  const esVistaFrontal = vista === "anterior" || vista === "posterior";
+
   function calcularResumen(lm: Landmark[]) {
-    const anguloHombros = calcularAnguloHombros(lm);
-    const anguloCadera = calcularAnguloCadera(lm);
-    const alineacionRodillas = calcularAlineacionRodillas(lm);
+    const anguloHombros = esVistaFrontal ? calcularAnguloHombros(lm) : null;
+    const anguloCadera = esVistaFrontal ? calcularAnguloCadera(lm) : null;
+    const alineacionRodillas = calcularAlineacionRodillasParaVista(lm, vista);
     setAngulos({
       hombros: anguloHombros,
       cadera: anguloCadera,
@@ -158,10 +159,16 @@ export function PosturalSlot({
 
         {angulos && (
           <div className="flex flex-col gap-1 text-xs">
-            <span>Ángulo hombros: {angulos.hombros}°</span>
-            <span>Ángulo cadera: {angulos.cadera}°</span>
             <span>
-              Rodillas: izq {angulos.valgoIzq}° / der {angulos.valgoDer}°
+              Ángulo hombros: {angulos.hombros !== null ? `${angulos.hombros}°` : "N/A (vista lateral)"}
+            </span>
+            <span>
+              Ángulo cadera: {angulos.cadera !== null ? `${angulos.cadera}°` : "N/A (vista lateral)"}
+            </span>
+            <span>
+              Rodillas: izq{" "}
+              {angulos.valgoIzq !== null ? `${angulos.valgoIzq}°` : "N/A"} / der{" "}
+              {angulos.valgoDer !== null ? `${angulos.valgoDer}°` : "N/A"}
             </span>
           </div>
         )}
