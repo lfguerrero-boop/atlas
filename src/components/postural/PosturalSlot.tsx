@@ -8,10 +8,10 @@ import {
   calcularAlineacionRodillasParaVista,
   calcularAnguloCadera,
   calcularAnguloHombros,
-  detectarAsimetrias,
   type Landmark,
   type Vista,
 } from "@/lib/postural/angulos";
+import { generarHallazgosPosturales } from "@/lib/postural/hallazgos";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -60,7 +60,9 @@ export function PosturalSlot({
       valgoDer: alineacionRodillas.valgoDerGrados,
     });
     setAsimetrias(
-      detectarAsimetrias({
+      generarHallazgosPosturales({
+        vista,
+        landmarks: lm,
         anguloHombros,
         anguloCadera,
         alineacionRodillas,
@@ -174,13 +176,19 @@ export function PosturalSlot({
         )}
 
         {asimetrias && asimetrias.length > 0 && (
-          <div className="flex flex-wrap gap-1">
+          <ul className="flex flex-col gap-1.5">
             {asimetrias.map((a, i) => (
-              <Badge key={i} variant="destructive" className="text-[10px]">
-                {a.hallazgo}
-              </Badge>
+              <li key={i} className="flex items-start gap-1.5 text-xs">
+                <Badge
+                  variant={a.severidad === "alta" ? "destructive" : "secondary"}
+                  className="mt-0.5 shrink-0 text-[10px]"
+                >
+                  {a.severidad}
+                </Badge>
+                <span className="text-muted-foreground">{a.hallazgo}</span>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
 
         {error && <p className="text-xs text-destructive">{error}</p>}

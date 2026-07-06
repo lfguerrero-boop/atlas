@@ -6,12 +6,25 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  clasificarPresionArterial,
+  clasificarFrecuenciaCardiaca,
+  clasificarSaturacionOxigeno,
+  detectarFactoresRiesgo,
+} from "@/lib/valoracion-fisica/interpretacion";
+
+function varianteBadge(nivel: string) {
+  if (nivel === "riesgo") return "destructive" as const;
+  if (nivel === "atencion") return "secondary" as const;
+  return "secondary" as const;
+}
 
 export default async function ValoracionFisicaPage({
   params,
@@ -38,20 +51,70 @@ export default async function ValoracionFisicaPage({
             <CardTitle className="text-base">Historial</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            {historial.map((registro, i) => (
-              <div key={registro.id}>
-                {i > 0 && <Separator className="mb-4" />}
-                <p className="text-xs text-muted-foreground">
-                  {registro.fecha}
-                </p>
-                <p className="mt-1 text-sm">
-                  FC reposo: {registro.frecuencia_cardiaca_reposo ?? "—"} lpm
-                  · PA: {registro.presion_arterial_sistolica ?? "—"}/
-                  {registro.presion_arterial_diastolica ?? "—"} mmHg · SpO2:{" "}
-                  {registro.saturacion_oxigeno ?? "—"}%
-                </p>
-              </div>
-            ))}
+            {historial.map((registro, i) => {
+              const clasifPresion =
+                registro.presion_arterial_sistolica != null &&
+                registro.presion_arterial_diastolica != null
+                  ? clasificarPresionArterial(
+                      registro.presion_arterial_sistolica,
+                      registro.presion_arterial_diastolica,
+                    )
+                  : null;
+              const clasifFc =
+                registro.frecuencia_cardiaca_reposo != null
+                  ? clasificarFrecuenciaCardiaca(registro.frecuencia_cardiaca_reposo)
+                  : null;
+              const clasifSpo2 =
+                registro.saturacion_oxigeno != null
+                  ? clasificarSaturacionOxigeno(registro.saturacion_oxigeno)
+                  : null;
+              const factoresRiesgo = detectarFactoresRiesgo({
+                presionArterial: clasifPresion,
+                frecuenciaCardiaca: clasifFc,
+                saturacionOxigeno: clasifSpo2,
+              });
+
+              return (
+                <div key={registro.id}>
+                  {i > 0 && <Separator className="mb-4" />}
+                  <p className="text-xs text-muted-foreground">
+                    {registro.fecha}
+                  </p>
+                  <p className="mt-1 text-sm">
+                    FC reposo: {registro.frecuencia_cardiaca_reposo ?? "—"} lpm
+                    · PA: {registro.presion_arterial_sistolica ?? "—"}/
+                    {registro.presion_arterial_diastolica ?? "—"} mmHg · SpO2:{" "}
+                    {registro.saturacion_oxigeno ?? "—"}%
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {clasifPresion && (
+                      <Badge variant={varianteBadge(clasifPresion.nivel)}>
+                        PA: {clasifPresion.categoria}
+                      </Badge>
+                    )}
+                    {clasifFc && (
+                      <Badge variant={varianteBadge(clasifFc.nivel)}>
+                        FC: {clasifFc.categoria}
+                      </Badge>
+                    )}
+                    {clasifSpo2 && (
+                      <Badge variant={varianteBadge(clasifSpo2.nivel)}>
+                        SpO2: {clasifSpo2.categoria}
+                      </Badge>
+                    )}
+                  </div>
+                  {factoresRiesgo.length > 0 && (
+                    <ul className="mt-2 flex flex-col gap-1">
+                      {factoresRiesgo.map((factor, j) => (
+                        <li key={j} className="text-xs text-destructive">
+                          ⚠ {factor}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
       )}

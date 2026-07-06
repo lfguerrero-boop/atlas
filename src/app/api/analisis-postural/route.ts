@@ -4,11 +4,11 @@ import {
   calcularAlineacionRodillasParaVista,
   calcularAnguloCadera,
   calcularAnguloHombros,
-  detectarAsimetrias,
   landmarksVisiblesParaVista,
   type Landmark,
   type Vista,
 } from "@/lib/postural/angulos";
+import { generarHallazgosPosturales } from "@/lib/postural/hallazgos";
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -68,7 +68,9 @@ export async function POST(request: NextRequest) {
     ? calcularAnguloCadera(landmarks)
     : null;
   const alineacionRodillas = calcularAlineacionRodillasParaVista(landmarks, vista);
-  const asimetrias = detectarAsimetrias({
+  const asimetrias = generarHallazgosPosturales({
+    vista,
+    landmarks,
     anguloHombros: anguloInclinacionHombros,
     anguloCadera: anguloInclinacionCadera,
     alineacionRodillas,

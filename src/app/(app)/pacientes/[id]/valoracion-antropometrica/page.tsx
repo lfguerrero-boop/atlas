@@ -13,9 +13,21 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  clasificarImc,
+  clasificarPorcentajeGrasa,
+  interpretarSomatotipo,
+  generarRecomendacionesAntropometricas,
+  type Genero,
+} from "@/lib/antropometria/interpretacion";
 
 const CAMPO_MM = { type: "number", step: "0.1" } as const;
 const CAMPO_CM = { type: "number", step: "0.1" } as const;
+
+function varianteBadge(nivel: string) {
+  if (nivel === "riesgo") return "destructive" as const;
+  return "secondary" as const;
+}
 
 export default async function ValoracionAntropometricaPage({
   params,
@@ -25,11 +37,16 @@ export default async function ValoracionAntropometricaPage({
   const { id: pacienteId } = await params;
   const supabase = await createClient();
 
-  const { data: historial } = await supabase
-    .from("valoraciones_antropometricas")
-    .select("*")
-    .eq("paciente_id", pacienteId)
-    .order("fecha", { ascending: false });
+  const [{ data: paciente }, { data: historial }] = await Promise.all([
+    supabase.from("pacientes").select("genero").eq("id", pacienteId).single(),
+    supabase
+      .from("valoraciones_antropometricas")
+      .select("*")
+      .eq("paciente_id", pacienteId)
+      .order("fecha", { ascending: false }),
+  ]);
+
+  const genero: Genero = (paciente?.genero as Genero) ?? "otro";
 
   const guardar = guardarValoracionAntropometrica.bind(null, pacienteId);
 
@@ -45,33 +62,68 @@ export default async function ValoracionAntropometricaPage({
             <CardTitle className="text-base">Historial</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            {historial.map((registro, i) => (
-              <div key={registro.id}>
-                {i > 0 && <Separator className="mb-4" />}
-                <p className="text-xs text-muted-foreground">
-                  {registro.fecha}
-                </p>
-                <div className="mt-1 flex flex-wrap gap-2">
-                  <Badge variant="secondary">
-                    Peso: {registro.peso_kg} kg
-                  </Badge>
-                  <Badge variant="secondary">IMC: {registro.imc}</Badge>
-                  <Badge variant="secondary">
-                    % Grasa: {registro.porcentaje_grasa}%
-                  </Badge>
-                  <Badge variant="secondary">
-                    Masa muscular: {registro.masa_muscular_kg} kg
-                  </Badge>
-                  {registro.somatotipo && (
+            {historial.map((registro, i) => {
+              const clasifImc =
+                registro.imc != null ? clasificarImc(registro.imc) : null;
+              const clasifGrasa =
+                registro.porcentaje_grasa != null
+                  ? clasificarPorcentajeGrasa(registro.porcentaje_grasa, genero)
+                  : null;
+              const somatotipoInterpretado = registro.somatotipo
+                ? interpretarSomatotipo(registro.somatotipo)
+                : null;
+              const recomendaciones =
+                clasifImc && clasifGrasa && somatotipoInterpretado
+                  ? generarRecomendacionesAntropometricas({
+                      clasificacionImc: clasifImc,
+                      clasificacionGrasa: clasifGrasa,
+                      somatotipo: somatotipoInterpretado,
+                    })
+                  : [];
+
+              return (
+                <div key={registro.id}>
+                  {i > 0 && <Separator className="mb-4" />}
+                  <p className="text-xs text-muted-foreground">
+                    {registro.fecha}
+                  </p>
+                  <div className="mt-1 flex flex-wrap gap-2">
                     <Badge variant="secondary">
-                      Somatotipo: {registro.somatotipo.endomorfia}-
-                      {registro.somatotipo.mesomorfia}-
-                      {registro.somatotipo.ectomorfia}
+                      Peso: {registro.peso_kg} kg
                     </Badge>
+                    <Badge variant={clasifImc ? varianteBadge(clasifImc.nivel) : "secondary"}>
+                      IMC: {registro.imc} {clasifImc ? `(${clasifImc.categoria})` : ""}
+                    </Badge>
+                    <Badge variant={clasifGrasa ? varianteBadge(clasifGrasa.nivel) : "secondary"}>
+                      % Grasa: {registro.porcentaje_grasa}%{" "}
+                      {clasifGrasa ? `(${clasifGrasa.categoria})` : ""}
+                    </Badge>
+                    <Badge variant="secondary">
+                      Masa muscular: {registro.masa_muscular_kg} kg
+                    </Badge>
+                    {registro.somatotipo && (
+                      <Badge variant="secondary">
+                        Somatotipo: {registro.somatotipo.endomorfia}-
+                        {registro.somatotipo.mesomorfia}-
+                        {registro.somatotipo.ectomorfia}
+                        {somatotipoInterpretado
+                          ? ` (${somatotipoInterpretado.dominante})`
+                          : ""}
+                      </Badge>
+                    )}
+                  </div>
+                  {recomendaciones.length > 0 && (
+                    <ul className="mt-2 flex flex-col gap-1">
+                      {recomendaciones.map((r, j) => (
+                        <li key={j} className="text-xs text-muted-foreground">
+                          • {r}
+                        </li>
+                      ))}
+                    </ul>
                   )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </CardContent>
         </Card>
       )}

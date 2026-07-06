@@ -5,6 +5,19 @@ import {
   View,
   StyleSheet,
 } from "@react-pdf/renderer";
+import {
+  clasificarImc,
+  clasificarPorcentajeGrasa,
+  interpretarSomatotipo,
+  generarRecomendacionesAntropometricas,
+  type Genero,
+} from "@/lib/antropometria/interpretacion";
+import {
+  clasificarPresionArterial,
+  clasificarFrecuenciaCardiaca,
+  clasificarSaturacionOxigeno,
+  detectarFactoresRiesgo,
+} from "@/lib/valoracion-fisica/interpretacion";
 
 const styles = StyleSheet.create({
   page: { padding: 32, fontSize: 10, fontFamily: "Helvetica" },
@@ -24,17 +37,10 @@ const styles = StyleSheet.create({
   fila: { flexDirection: "row", marginBottom: 3 },
   etiqueta: { width: 160, color: "#78716C" },
   valor: { flex: 1 },
-  badge: {
-    fontSize: 9,
-    backgroundColor: "#F1F5F4",
-    color: "#134E4A",
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 4,
-    marginRight: 4,
-    marginBottom: 4,
-  },
-  badgeRow: { flexDirection: "row", flexWrap: "wrap" },
+  clasificacion: { fontSize: 9, color: "#0D9488", marginTop: 1, marginBottom: 4 },
+  riesgo: { fontSize: 9, color: "#DC2626", marginTop: 1, marginBottom: 2 },
+  recomendacion: { fontSize: 9, color: "#134E4A", marginTop: 1, marginBottom: 2 },
+  hallazgo: { fontSize: 9, marginBottom: 4 },
   footer: {
     position: "absolute",
     bottom: 24,
@@ -44,10 +50,16 @@ const styles = StyleSheet.create({
     color: "#78716C",
     textAlign: "center",
   },
+  disclaimer: {
+    fontSize: 8,
+    color: "#78716C",
+    marginTop: 6,
+    fontStyle: "italic",
+  },
 });
 
 export type ReportePDFProps = {
-  paciente: { nombreCompleto: string };
+  paciente: { nombreCompleto: string; genero: Genero };
   profesional: { nombreCompleto: string };
   fechaGeneracion: string;
   anamnesis: {
@@ -58,6 +70,7 @@ export type ReportePDFProps = {
     frecuenciaCardiacaReposo: number | null;
     presionArterialSistolica: number | null;
     presionArterialDiastolica: number | null;
+    saturacionOxigeno: number | null;
   } | null;
   antropometrica: {
     pesoKg: number | null;
@@ -80,6 +93,46 @@ export function ReportePDF(props: ReportePDFProps) {
     antropometrica,
     hallazgosPosturales,
   } = props;
+
+  const clasifImc =
+    antropometrica?.imc != null ? clasificarImc(antropometrica.imc) : null;
+  const clasifGrasa =
+    antropometrica?.porcentajeGrasa != null
+      ? clasificarPorcentajeGrasa(antropometrica.porcentajeGrasa, paciente.genero)
+      : null;
+  const somatotipoInterpretado = antropometrica?.somatotipo
+    ? interpretarSomatotipo(antropometrica.somatotipo)
+    : null;
+  const recomendacionesAntropometricas =
+    clasifImc && clasifGrasa && somatotipoInterpretado
+      ? generarRecomendacionesAntropometricas({
+          clasificacionImc: clasifImc,
+          clasificacionGrasa: clasifGrasa,
+          somatotipo: somatotipoInterpretado,
+        })
+      : [];
+
+  const clasifPresion =
+    valoracionFisica?.presionArterialSistolica != null &&
+    valoracionFisica?.presionArterialDiastolica != null
+      ? clasificarPresionArterial(
+          valoracionFisica.presionArterialSistolica,
+          valoracionFisica.presionArterialDiastolica,
+        )
+      : null;
+  const clasifFc =
+    valoracionFisica?.frecuenciaCardiacaReposo != null
+      ? clasificarFrecuenciaCardiaca(valoracionFisica.frecuenciaCardiacaReposo)
+      : null;
+  const clasifSpo2 =
+    valoracionFisica?.saturacionOxigeno != null
+      ? clasificarSaturacionOxigeno(valoracionFisica.saturacionOxigeno)
+      : null;
+  const factoresRiesgo = detectarFactoresRiesgo({
+    presionArterial: clasifPresion,
+    frecuenciaCardiaca: clasifFc,
+    saturacionOxigeno: clasifSpo2,
+  });
 
   return (
     <Document>
@@ -116,6 +169,7 @@ export function ReportePDF(props: ReportePDFProps) {
               {valoracionFisica?.frecuenciaCardiacaReposo ?? "—"} lpm
             </Text>
           </View>
+          {clasifFc && <Text style={styles.clasificacion}>→ {clasifFc.categoria}: {clasifFc.descripcion}</Text>}
           <View style={styles.fila}>
             <Text style={styles.etiqueta}>Presión arterial</Text>
             <Text style={styles.valor}>
@@ -123,6 +177,17 @@ export function ReportePDF(props: ReportePDFProps) {
               {valoracionFisica?.presionArterialDiastolica ?? "—"} mmHg
             </Text>
           </View>
+          {clasifPresion && <Text style={styles.clasificacion}>→ {clasifPresion.categoria}: {clasifPresion.descripcion}</Text>}
+          <View style={styles.fila}>
+            <Text style={styles.etiqueta}>Saturación de oxígeno</Text>
+            <Text style={styles.valor}>
+              {valoracionFisica?.saturacionOxigeno ?? "—"}%
+            </Text>
+          </View>
+          {clasifSpo2 && <Text style={styles.clasificacion}>→ {clasifSpo2.categoria}: {clasifSpo2.descripcion}</Text>}
+          {factoresRiesgo.map((f, i) => (
+            <Text key={i} style={styles.riesgo}>⚠ {f}</Text>
+          ))}
         </View>
 
         <View style={styles.seccion}>
@@ -137,12 +202,14 @@ export function ReportePDF(props: ReportePDFProps) {
             <Text style={styles.etiqueta}>IMC</Text>
             <Text style={styles.valor}>{antropometrica?.imc ?? "—"}</Text>
           </View>
+          {clasifImc && <Text style={styles.clasificacion}>→ {clasifImc.categoria}: {clasifImc.descripcion}</Text>}
           <View style={styles.fila}>
             <Text style={styles.etiqueta}>% de grasa corporal</Text>
             <Text style={styles.valor}>
               {antropometrica?.porcentajeGrasa ?? "—"}%
             </Text>
           </View>
+          {clasifGrasa && <Text style={styles.clasificacion}>→ {clasifGrasa.categoria}: {clasifGrasa.descripcion}</Text>}
           <View style={styles.fila}>
             <Text style={styles.etiqueta}>Masa muscular estimada</Text>
             <Text style={styles.valor}>
@@ -156,21 +223,31 @@ export function ReportePDF(props: ReportePDFProps) {
                 {antropometrica.somatotipo.endomorfia}-
                 {antropometrica.somatotipo.mesomorfia}-
                 {antropometrica.somatotipo.ectomorfia}
+                {somatotipoInterpretado ? ` (${somatotipoInterpretado.dominante})` : ""}
               </Text>
             </View>
           )}
+          {recomendacionesAntropometricas.map((r, i) => (
+            <Text key={i} style={styles.recomendacion}>• {r}</Text>
+          ))}
         </View>
 
         <View style={styles.seccion}>
           <Text style={styles.seccionTitulo}>Análisis postural</Text>
           {hallazgosPosturales.length > 0 ? (
-            <View style={styles.badgeRow}>
+            <>
               {hallazgosPosturales.map((h, i) => (
-                <Text key={i} style={styles.badge}>
-                  {h.hallazgo} ({h.severidad})
+                <Text key={i} style={styles.hallazgo}>
+                  • [{h.severidad}] {h.hallazgo}
                 </Text>
               ))}
-            </View>
+              <Text style={styles.disclaimer}>
+                Estos son hallazgos de cribado generados por un modelo de
+                detección de pose (IA) a partir de fotografías — no
+                constituyen diagnóstico médico. Requieren confirmación
+                mediante evaluación clínica presencial.
+              </Text>
+            </>
           ) : (
             <Text>Sin asimetrías detectadas o análisis no realizado.</Text>
           )}

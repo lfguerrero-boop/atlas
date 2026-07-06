@@ -17,7 +17,7 @@ export async function generarReportePaciente(
 ) {
   const { data: paciente, error: pacienteError } = await supabase
     .from("pacientes")
-    .select("id, nombre_completo, email, profesional_id")
+    .select("id, nombre_completo, email, genero, profesional_id")
     .eq("id", pacienteId)
     .single();
 
@@ -49,7 +49,7 @@ export async function generarReportePaciente(
     supabase
       .from("valoraciones_fisicas")
       .select(
-        "frecuencia_cardiaca_reposo, presion_arterial_sistolica, presion_arterial_diastolica",
+        "frecuencia_cardiaca_reposo, presion_arterial_sistolica, presion_arterial_diastolica, saturacion_oxigeno",
       )
       .eq("paciente_id", pacienteId)
       .order("fecha", { ascending: false })
@@ -101,7 +101,10 @@ export async function generarReportePaciente(
 
   const buffer = await renderToBuffer(
     ReportePDF({
-      paciente: { nombreCompleto: paciente.nombre_completo },
+      paciente: {
+        nombreCompleto: paciente.nombre_completo,
+        genero: (paciente.genero as "masculino" | "femenino" | "otro") ?? "otro",
+      },
       profesional: { nombreCompleto: profesional?.nombre_completo ?? "" },
       fechaGeneracion,
       anamnesis: anamnesis
@@ -115,6 +118,7 @@ export async function generarReportePaciente(
             frecuenciaCardiacaReposo: valoracionFisica.frecuencia_cardiaca_reposo,
             presionArterialSistolica: valoracionFisica.presion_arterial_sistolica,
             presionArterialDiastolica: valoracionFisica.presion_arterial_diastolica,
+            saturacionOxigeno: valoracionFisica.saturacion_oxigeno,
           }
         : null,
       antropometrica: antropometrica

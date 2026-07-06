@@ -10,6 +10,24 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  clasificarImc,
+  clasificarPorcentajeGrasa,
+  interpretarSomatotipo,
+  generarRecomendacionesAntropometricas,
+  type Genero,
+} from "@/lib/antropometria/interpretacion";
+import {
+  clasificarPresionArterial,
+  clasificarFrecuenciaCardiaca,
+  clasificarSaturacionOxigeno,
+  detectarFactoresRiesgo,
+} from "@/lib/valoracion-fisica/interpretacion";
+
+function varianteBadge(nivel: string) {
+  if (nivel === "riesgo") return "destructive" as const;
+  return "secondary" as const;
+}
 
 export default async function ResultadosPage({
   params,
@@ -26,7 +44,11 @@ export default async function ResultadosPage({
     { data: antropometricas },
     { data: fotos },
   ] = await Promise.all([
-    supabase.from("pacientes").select("email").eq("id", pacienteId).single(),
+    supabase
+      .from("pacientes")
+      .select("email, genero")
+      .eq("id", pacienteId)
+      .single(),
     supabase
       .from("anamnesis")
       .select("*")
@@ -81,6 +103,48 @@ export default async function ResultadosPage({
     })
     .slice(0, 10) as { hallazgo: string; severidad: string }[];
 
+  const genero: Genero = (paciente?.genero as Genero) ?? "otro";
+
+  const clasifImc = ultimaAntropometrica?.imc != null
+    ? clasificarImc(ultimaAntropometrica.imc)
+    : null;
+  const clasifGrasa = ultimaAntropometrica?.porcentaje_grasa != null
+    ? clasificarPorcentajeGrasa(ultimaAntropometrica.porcentaje_grasa, genero)
+    : null;
+  const somatotipoInterpretado = ultimaAntropometrica?.somatotipo
+    ? interpretarSomatotipo(ultimaAntropometrica.somatotipo)
+    : null;
+  const recomendacionesAntropometricas =
+    clasifImc && clasifGrasa && somatotipoInterpretado
+      ? generarRecomendacionesAntropometricas({
+          clasificacionImc: clasifImc,
+          clasificacionGrasa: clasifGrasa,
+          somatotipo: somatotipoInterpretado,
+        })
+      : [];
+
+  const clasifPresion =
+    valoracionFisica?.presion_arterial_sistolica != null &&
+    valoracionFisica?.presion_arterial_diastolica != null
+      ? clasificarPresionArterial(
+          valoracionFisica.presion_arterial_sistolica,
+          valoracionFisica.presion_arterial_diastolica,
+        )
+      : null;
+  const clasifFc =
+    valoracionFisica?.frecuencia_cardiaca_reposo != null
+      ? clasificarFrecuenciaCardiaca(valoracionFisica.frecuencia_cardiaca_reposo)
+      : null;
+  const clasifSpo2 =
+    valoracionFisica?.saturacion_oxigeno != null
+      ? clasificarSaturacionOxigeno(valoracionFisica.saturacion_oxigeno)
+      : null;
+  const factoresRiesgo = detectarFactoresRiesgo({
+    presionArterial: clasifPresion,
+    frecuenciaCardiaca: clasifFc,
+    saturacionOxigeno: clasifSpo2,
+  });
+
   return (
     <div className="flex flex-col gap-6">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -102,16 +166,33 @@ export default async function ResultadosPage({
               Composición corporal actual
             </CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
+          <CardContent className="flex flex-col gap-2">
             {ultimaAntropometrica ? (
               <>
-                <Badge variant="secondary">
-                  Peso: {ultimaAntropometrica.peso_kg} kg
-                </Badge>
-                <Badge variant="secondary">IMC: {ultimaAntropometrica.imc}</Badge>
-                <Badge variant="secondary">
-                  % Grasa: {ultimaAntropometrica.porcentaje_grasa}%
-                </Badge>
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="secondary">
+                    Peso: {ultimaAntropometrica.peso_kg} kg
+                  </Badge>
+                  <Badge variant={clasifImc ? varianteBadge(clasifImc.nivel) : "secondary"}>
+                    IMC: {ultimaAntropometrica.imc} {clasifImc ? `(${clasifImc.categoria})` : ""}
+                  </Badge>
+                  <Badge variant={clasifGrasa ? varianteBadge(clasifGrasa.nivel) : "secondary"}>
+                    % Grasa: {ultimaAntropometrica.porcentaje_grasa}%{" "}
+                    {clasifGrasa ? `(${clasifGrasa.categoria})` : ""}
+                  </Badge>
+                  {somatotipoInterpretado && (
+                    <Badge variant="secondary">{somatotipoInterpretado.dominante}</Badge>
+                  )}
+                </div>
+                {recomendacionesAntropometricas.length > 0 && (
+                  <ul className="flex flex-col gap-1">
+                    {recomendacionesAntropometricas.map((r, i) => (
+                      <li key={i} className="text-xs text-muted-foreground">
+                        • {r}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </>
             ) : (
               <p className="text-sm text-muted-foreground">Sin registrar</p>
@@ -124,13 +205,41 @@ export default async function ResultadosPage({
               Signos vitales recientes
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex flex-col gap-2">
             {valoracionFisica ? (
-              <p className="text-sm">
-                FC {valoracionFisica.frecuencia_cardiaca_reposo ?? "—"} lpm ·
-                PA {valoracionFisica.presion_arterial_sistolica ?? "—"}/
-                {valoracionFisica.presion_arterial_diastolica ?? "—"}
-              </p>
+              <>
+                <p className="text-sm">
+                  FC {valoracionFisica.frecuencia_cardiaca_reposo ?? "—"} lpm ·
+                  PA {valoracionFisica.presion_arterial_sistolica ?? "—"}/
+                  {valoracionFisica.presion_arterial_diastolica ?? "—"}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {clasifPresion && (
+                    <Badge variant={varianteBadge(clasifPresion.nivel)}>
+                      PA: {clasifPresion.categoria}
+                    </Badge>
+                  )}
+                  {clasifFc && (
+                    <Badge variant={varianteBadge(clasifFc.nivel)}>
+                      FC: {clasifFc.categoria}
+                    </Badge>
+                  )}
+                  {clasifSpo2 && (
+                    <Badge variant={varianteBadge(clasifSpo2.nivel)}>
+                      SpO2: {clasifSpo2.categoria}
+                    </Badge>
+                  )}
+                </div>
+                {factoresRiesgo.length > 0 && (
+                  <ul className="flex flex-col gap-1">
+                    {factoresRiesgo.map((factor, i) => (
+                      <li key={i} className="text-xs text-destructive">
+                        ⚠ {factor}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
             ) : (
               <p className="text-sm text-muted-foreground">Sin registrar</p>
             )}
@@ -157,21 +266,31 @@ export default async function ResultadosPage({
         </CardHeader>
         <CardContent>
           {asimetriasRecientes.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
+            <ul className="flex flex-col gap-2">
               {asimetriasRecientes.map((a, i) => (
-                <Badge
-                  key={i}
-                  variant={a.severidad === "alta" ? "destructive" : "secondary"}
-                >
-                  {a.hallazgo}
-                </Badge>
+                <li key={i} className="flex items-start gap-2 text-sm">
+                  <Badge
+                    variant={a.severidad === "alta" ? "destructive" : "secondary"}
+                    className="mt-0.5 shrink-0"
+                  >
+                    {a.severidad}
+                  </Badge>
+                  <span className="text-muted-foreground">{a.hallazgo}</span>
+                </li>
               ))}
-            </div>
+            </ul>
           ) : (
             <p className="text-sm text-muted-foreground">
               {fotos && fotos.length > 0
                 ? "Sin asimetrías detectadas."
                 : "Todavía no se cargó el análisis postural."}
+            </p>
+          )}
+          {asimetriasRecientes.length > 0 && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Estos son hallazgos de cribado por IA a partir de puntos
+              corporales detectados en la foto — no constituyen diagnóstico
+              médico. Requieren confirmación del profesional.
             </p>
           )}
         </CardContent>
